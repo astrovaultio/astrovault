@@ -1,4 +1,4 @@
-!/.idea/
+.idea/
 
 !/.venv/
 /astrovault-backend/src/main/resources/jwt/

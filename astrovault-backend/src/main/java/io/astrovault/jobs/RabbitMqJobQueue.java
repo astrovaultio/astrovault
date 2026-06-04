@@ -6,25 +6,15 @@ import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.MessageProperties;
 import io.astrovault.domain.ProcessingJob;
-import io.quarkus.arc.lookup.LookupIfProperty;
-import jakarta.annotation.PostConstruct;
-import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.util.HashMap;
 import java.util.Map;
 
-@ApplicationScoped
-@LookupIfProperty(name = "astrovault.queue.mode", stringValue = "rabbitmq")
 public class RabbitMqJobQueue implements JobQueue {
-
-    @ConfigProperty(name = "astrovault.rabbitmq.host")
-    String host;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private ConnectionFactory factory;
 
-    @PostConstruct
-    void init() {
+    RabbitMqJobQueue(String host) {
         factory = new ConnectionFactory();
         factory.setHost(host);
     }

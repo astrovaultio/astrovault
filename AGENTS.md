@@ -32,6 +32,7 @@ Security and robustness:
 - Fail safely.
 - Log concise actionable errors.
 - Handle retries and transient failures where appropriate.
+- Always use latest secure dependencies.
 
 AstroVault product principles:
 - FITS-first.

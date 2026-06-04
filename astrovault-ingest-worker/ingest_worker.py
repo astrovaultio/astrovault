@@ -50,9 +50,6 @@ class StableTracker:
         self._seen = {}
 
     def is_stable(self, key: str, size: int, mtime_ts: float, now_ts: float) -> bool:
-        if size > 0 and (now_ts - mtime_ts) >= self.stable_seconds:
-            self._seen[key] = (size, mtime_ts, now_ts)
-            return True
         prev = self._seen.get(key)
         self._seen[key] = (size, mtime_ts, now_ts)
         if prev is None:

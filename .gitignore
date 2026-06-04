@@ -1,0 +1,7 @@
+.idea/
+
+!/.venv/
+/astrovault-backend/src/main/resources/jwt/
+/astrovault-backend/target/
+/astrovault-frontend/dist/
+/astrovault-frontend/node_modules/

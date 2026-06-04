@@ -1,0 +1,7 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-processingjob-status-cancelled
+      author: astrovault
+      comment: JobStatus is stored as VARCHAR, so adding CANCELLED requires no database DDL.
+      changes:
+        - sql: SELECT 1

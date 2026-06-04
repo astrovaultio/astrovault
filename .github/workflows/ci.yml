@@ -1,0 +1,341 @@
+name: AstroVault CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ["**"]
+    tags: ["v*.*.*"]
+  schedule:
+    - cron: "23 3 * * 1"
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+  security-events: write
+  pull-requests: read
+
+env:
+  REGISTRY: ghcr.io
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      worker: ${{ steps.filter.outputs.worker }}
+      ingest_worker: ${{ steps.filter.outputs.ingest_worker }}
+      all: ${{ steps.filter.outputs.all }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'astrovault-backend/**'
+              - '.github/workflows/**'
+            frontend:
+              - 'astrovault-frontend/**'
+              - '.github/workflows/**'
+            worker:
+              - 'astrovault-worker/**'
+              - '.github/workflows/**'
+            ingest_worker:
+              - 'astrovault-ingest-worker/**'
+              - '.github/workflows/**'
+            all:
+              - 'deploy/**'
+              - 'docker-compose*.yml'
+              - '.github/**'
+
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-2.0, LGPL-2.0
+
+  gitleaks:
+    name: Secret Scan - Gitleaks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run Gitleaks
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo" \
+            ghcr.io/gitleaks/gitleaks:latest \
+            detect --source=/repo --redact --verbose
+
+  trivy-fs:
+    name: Trivy Filesystem Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: aquasecurity/trivy-action@master
+        continue-on-error: true
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH
+          vuln-type: os,library
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - uses: github/codeql-action/upload-sarif@v4
+        if: hashFiles('trivy-fs.sarif') != ''
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  scorecard:
+    name: OpenSSF Scorecard
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@v2.4.0
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true
+
+      - uses: github/codeql-action/upload-sarif@v4
+        if: hashFiles('scorecard.sarif') != ''
+        with:
+          sarif_file: scorecard.sarif
+          category: openssf-scorecard
+
+  test-backend:
+    name: Test backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.all == 'true' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: astrovault-backend
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Maven verify
+        run: mvn -B verify
+
+  test-frontend:
+    name: Test frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.all == 'true' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: astrovault-frontend
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: astrovault-frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint --if-present
+      - run: npm test --if-present
+      - run: npm run build
+
+  test-worker:
+    name: Test worker
+    needs: changes
+    if: needs.changes.outputs.worker == 'true' || needs.changes.outputs.all == 'true' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: astrovault-worker
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - run: |
+          python3 -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then python3 -m pip install -r requirements.txt; fi
+          if [ -f pyproject.toml ]; then python3 -m pip install .[test]; fi
+          python3 -m pip install pytest
+          python3 -m pytest -q
+
+  test-ingest-worker:
+    name: Test ingest worker
+    needs: changes
+    if: needs.changes.outputs.ingest_worker == 'true' || needs.changes.outputs.all == 'true' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: astrovault-ingest-worker
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - run: |
+          python3 -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then python3 -m pip install -r requirements.txt; fi
+          if [ -f pyproject.toml ]; then python3 -m pip install .[test]; fi
+          python3 -m pip install pytest
+          python3 -m pytest -q
+
+  build-backend:
+    name: Build backend image
+    needs: [changes, test-backend]
+    if: |
+      always() &&
+      (needs.changes.outputs.backend == 'true' || needs.changes.outputs.all == 'true' || startsWith(github.ref, 'refs/tags/v')) &&
+      (needs.test-backend.result == 'success' || needs.test-backend.result == 'skipped')
+    uses: ./.github/workflows/reusable-container-build.yml
+    with:
+      component: backend
+      image_name: astrovault-backend
+      context: astrovault-backend
+      dockerfile: astrovault-backend/Dockerfile
+    secrets: inherit
+
+  build-frontend:
+    name: Build frontend image
+    needs: [changes, test-frontend]
+    if: |
+      always() &&
+      (needs.changes.outputs.frontend == 'true' || needs.changes.outputs.all == 'true' || startsWith(github.ref, 'refs/tags/v')) &&
+      (needs.test-frontend.result == 'success' || needs.test-frontend.result == 'skipped')
+    uses: ./.github/workflows/reusable-container-build.yml
+    with:
+      component: frontend
+      image_name: astrovault-frontend
+      context: astrovault-frontend
+      dockerfile: astrovault-frontend/Dockerfile
+    secrets: inherit
+
+  build-worker:
+    name: Build worker image
+    needs: [changes, test-worker]
+    if: |
+      always() &&
+      (needs.changes.outputs.worker == 'true' || needs.changes.outputs.all == 'true' || startsWith(github.ref, 'refs/tags/v')) &&
+      (needs.test-worker.result == 'success' || needs.test-worker.result == 'skipped')
+    uses: ./.github/workflows/reusable-container-build.yml
+    with:
+      component: worker
+      image_name: astrovault-worker
+      context: astrovault-worker
+      dockerfile: astrovault-worker/Dockerfile
+    secrets: inherit
+
+  build-ingest-worker:
+    name: Build ingest worker image
+    needs: [changes, test-ingest-worker]
+    if: |
+      always() &&
+      (needs.changes.outputs.ingest_worker == 'true' || needs.changes.outputs.all == 'true' || startsWith(github.ref, 'refs/tags/v')) &&
+      (needs.test-ingest-worker.result == 'success' || needs.test-ingest-worker.result == 'skipped')
+    uses: ./.github/workflows/reusable-container-build.yml
+    with:
+      component: ingest-worker
+      image_name: astrovault-ingest-worker
+      context: astrovault-ingest-worker
+      dockerfile: astrovault-ingest-worker/Dockerfile
+    secrets: inherit
+
+  release:
+    name: GitHub Release
+    needs:
+      - build-backend
+      - build-frontend
+      - build-worker
+      - build-ingest-worker
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+      attestations: read
+      id-token: write
+    steps:
+      - name: Create release notes
+        run: |
+          cat > release-notes.md <<EOF
+          ## AstroVault ${GITHUB_REF_NAME}
+
+          Container images:
+
+          - ghcr.io/${{ github.repository_owner }}/astrovault-backend:${GITHUB_REF_NAME}
+          - ghcr.io/${{ github.repository_owner }}/astrovault-frontend:${GITHUB_REF_NAME}
+          - ghcr.io/${{ github.repository_owner }}/astrovault-worker:${GITHUB_REF_NAME}
+          - ghcr.io/${{ github.repository_owner }}/astrovault-ingest-worker:${GITHUB_REF_NAME}
+
+          All release images include:
+          - SBOM
+          - Docker Buildx provenance mode=max
+          - GitHub Artifact Attestation
+          - Trivy image scan
+          EOF
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          generate_release_notes: true

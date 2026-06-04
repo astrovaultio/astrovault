@@ -1,0 +1,93 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-initial-schema
+      author: astrovault
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            tableExists:
+              tableName: ProcessingJob
+      changes:
+        - createSequence: { sequenceName: Target_SEQ, startValue: 1, incrementBy: 50 }
+        - createSequence: { sequenceName: ImagingSession_SEQ, startValue: 1, incrementBy: 50 }
+        - createSequence: { sequenceName: Frame_SEQ, startValue: 1, incrementBy: 50 }
+        - createSequence: { sequenceName: ProcessedAsset_SEQ, startValue: 1, incrementBy: 50 }
+        - createSequence: { sequenceName: ProcessingJob_SEQ, startValue: 1, incrementBy: 50 }
+        - createSequence: { sequenceName: EquipmentProfile_SEQ, startValue: 1, incrementBy: 50 }
+        - createTable:
+            tableName: Target
+            columns:
+              - column: { name: id, type: BIGINT, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: name, type: VARCHAR(255) }
+              - column: { name: type, type: VARCHAR(64) }
+              - column: { name: ra, type: DOUBLE }
+              - column: { name: dec, type: DOUBLE }
+              - column: { name: notes, type: VARCHAR(255) }
+        - createTable:
+            tableName: ImagingSession
+            columns:
+              - column: { name: id, type: BIGINT, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: target_id, type: BIGINT }
+              - column: { name: startTime, type: TIMESTAMP }
+              - column: { name: endTime, type: TIMESTAMP }
+              - column: { name: notes, type: VARCHAR(255) }
+              - column: { name: totalIntegrationTime, type: BIGINT }
+        - createTable:
+            tableName: Frame
+            columns:
+              - column: { name: id, type: BIGINT, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: session_id, type: BIGINT }
+              - column: { name: frameType, type: VARCHAR(64) }
+              - column: { name: processingStatus, type: VARCHAR(64) }
+              - column: { name: originalFilename, type: VARCHAR(255) }
+              - column: { name: storageKey, type: VARCHAR(255) }
+              - column: { name: checksum, type: VARCHAR(255) }
+              - column: { name: sourceName, type: VARCHAR(255) }
+              - column: { name: cameraName, type: VARCHAR(255) }
+              - column: { name: observedAt, type: TIMESTAMP }
+              - column: { name: exposureSeconds, type: BIGINT }
+              - column: { name: previewStorageKey, type: VARCHAR(255) }
+              - column: { name: thumbnailStorageKey, type: VARCHAR(255) }
+              - column: { name: metadata, type: CLOB }
+        - createTable:
+            tableName: ProcessedAsset
+            columns:
+              - column: { name: id, type: BIGINT, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: session_id, type: BIGINT }
+              - column: { name: target_id, type: BIGINT }
+              - column: { name: title, type: VARCHAR(255) }
+              - column: { name: description, type: VARCHAR(255) }
+              - column: { name: storageKey, type: VARCHAR(255) }
+              - column: { name: previewStorageKey, type: VARCHAR(255) }
+              - column: { name: software, type: VARCHAR(255) }
+              - column: { name: versionLabel, type: VARCHAR(255) }
+              - column: { name: notes, type: VARCHAR(255) }
+              - column: { name: checksum, type: VARCHAR(255) }
+              - column: { name: uploadedBy, type: VARCHAR(255) }
+              - column: { name: createdAt, type: TIMESTAMP }
+        - createTable:
+            tableName: ProcessingJob
+            columns:
+              - column: { name: id, type: BIGINT, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: type, type: VARCHAR(64) }
+              - column: { name: status, type: VARCHAR(64) }
+              - column: { name: createdAt, type: TIMESTAMP }
+              - column: { name: startedAt, type: TIMESTAMP }
+              - column: { name: finishedAt, type: TIMESTAMP }
+              - column: { name: errorMessage, type: VARCHAR(255) }
+              - column: { name: frameId, type: BIGINT }
+              - column: { name: sessionId, type: BIGINT }
+              - column: { name: resultStorageKey, type: VARCHAR(255) }
+        - createTable:
+            tableName: EquipmentProfile
+            columns:
+              - column: { name: id, type: BIGINT, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: camera, type: VARCHAR(255) }
+              - column: { name: telescope, type: VARCHAR(255) }
+              - column: { name: mount, type: VARCHAR(255) }
+              - column: { name: filter, type: VARCHAR(255) }
+              - column: { name: focuser, type: VARCHAR(255) }
+        - addForeignKeyConstraint: { baseTableName: ImagingSession, baseColumnNames: target_id, referencedTableName: Target, referencedColumnNames: id, constraintName: fk_session_target }
+        - addForeignKeyConstraint: { baseTableName: Frame, baseColumnNames: session_id, referencedTableName: ImagingSession, referencedColumnNames: id, constraintName: fk_frame_session }
+        - addForeignKeyConstraint: { baseTableName: ProcessedAsset, baseColumnNames: session_id, referencedTableName: ImagingSession, referencedColumnNames: id, constraintName: fk_asset_session }
+        - addForeignKeyConstraint: { baseTableName: ProcessedAsset, baseColumnNames: target_id, referencedTableName: Target, referencedColumnNames: id, constraintName: fk_asset_target }

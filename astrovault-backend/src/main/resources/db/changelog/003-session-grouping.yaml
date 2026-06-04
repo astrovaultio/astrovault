@@ -1,0 +1,15 @@
+databaseChangeLog:
+  - changeSet:
+      id: 003-session-grouping
+      author: astrovault
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            columnExists:
+              tableName: ImagingSession
+              columnName: logicalGroupKey
+      changes:
+        - addColumn:
+            tableName: ImagingSession
+            columns:
+              - column: { name: logicalGroupKey, type: VARCHAR(255) }

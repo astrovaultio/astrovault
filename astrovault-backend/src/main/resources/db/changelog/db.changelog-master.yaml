@@ -1,0 +1,13 @@
+databaseChangeLog:
+  - include:
+      file: db/changelog/001-initial-schema.yaml
+  - include:
+      file: db/changelog/002-processingjob-status-cancelled.yaml
+  - include:
+      file: db/changelog/003-session-grouping.yaml
+  - include:
+      file: db/changelog/004-users-rbac.yaml
+  - include:
+      file: db/changelog/005-session-manual-workflow-status.yaml
+  - include:
+      file: db/changelog/006-frame-source-name-text.yaml

@@ -1,0 +1,91 @@
+databaseChangeLog:
+  - changeSet:
+      id: 007-normalize-postgres-identifiers
+      author: astrovault
+      comment: Normalize legacy quoted CamelCase identifiers to the unquoted lowercase names used by Hibernate on PostgreSQL.
+      changes:
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            stripComments: true
+            sql: |
+              DO $$
+              BEGIN
+                IF to_regclass('"Target"') IS NOT NULL AND to_regclass('target') IS NULL THEN ALTER TABLE "Target" RENAME TO target; END IF;
+                IF to_regclass('"ImagingSession"') IS NOT NULL AND to_regclass('imagingsession') IS NULL THEN ALTER TABLE "ImagingSession" RENAME TO imagingsession; END IF;
+                IF to_regclass('"Frame"') IS NOT NULL AND to_regclass('frame') IS NULL THEN ALTER TABLE "Frame" RENAME TO frame; END IF;
+                IF to_regclass('"ProcessedAsset"') IS NOT NULL AND to_regclass('processedasset') IS NULL THEN ALTER TABLE "ProcessedAsset" RENAME TO processedasset; END IF;
+                IF to_regclass('"ProcessingJob"') IS NOT NULL AND to_regclass('processingjob') IS NULL THEN ALTER TABLE "ProcessingJob" RENAME TO processingjob; END IF;
+                IF to_regclass('"EquipmentProfile"') IS NOT NULL AND to_regclass('equipmentprofile') IS NULL THEN ALTER TABLE "EquipmentProfile" RENAME TO equipmentprofile; END IF;
+
+                IF to_regclass('"Target_SEQ"') IS NOT NULL AND to_regclass('target_seq') IS NULL THEN ALTER SEQUENCE "Target_SEQ" RENAME TO target_seq; END IF;
+                IF to_regclass('"ImagingSession_SEQ"') IS NOT NULL AND to_regclass('imagingsession_seq') IS NULL THEN ALTER SEQUENCE "ImagingSession_SEQ" RENAME TO imagingsession_seq; END IF;
+                IF to_regclass('"Frame_SEQ"') IS NOT NULL AND to_regclass('frame_seq') IS NULL THEN ALTER SEQUENCE "Frame_SEQ" RENAME TO frame_seq; END IF;
+                IF to_regclass('"ProcessedAsset_SEQ"') IS NOT NULL AND to_regclass('processedasset_seq') IS NULL THEN ALTER SEQUENCE "ProcessedAsset_SEQ" RENAME TO processedasset_seq; END IF;
+                IF to_regclass('"ProcessingJob_SEQ"') IS NOT NULL AND to_regclass('processingjob_seq') IS NULL THEN ALTER SEQUENCE "ProcessingJob_SEQ" RENAME TO processingjob_seq; END IF;
+                IF to_regclass('"EquipmentProfile_SEQ"') IS NOT NULL AND to_regclass('equipmentprofile_seq') IS NULL THEN ALTER SEQUENCE "EquipmentProfile_SEQ" RENAME TO equipmentprofile_seq; END IF;
+
+                IF to_regclass('imagingsession') IS NOT NULL THEN
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'imagingsession' AND column_name = 'startTime') THEN ALTER TABLE imagingsession RENAME COLUMN "startTime" TO starttime; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'imagingsession' AND column_name = 'endTime') THEN ALTER TABLE imagingsession RENAME COLUMN "endTime" TO endtime; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'imagingsession' AND column_name = 'totalIntegrationTime') THEN ALTER TABLE imagingsession RENAME COLUMN "totalIntegrationTime" TO totalintegrationtime; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'imagingsession' AND column_name = 'logicalGroupKey') THEN ALTER TABLE imagingsession RENAME COLUMN "logicalGroupKey" TO logicalgroupkey; END IF;
+                  ALTER TABLE imagingsession ADD COLUMN IF NOT EXISTS manualworkflowstatus VARCHAR(64);
+                END IF;
+
+                IF to_regclass('frame') IS NOT NULL THEN
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'frame' AND column_name = 'frameType') THEN ALTER TABLE frame RENAME COLUMN "frameType" TO frametype; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'frame' AND column_name = 'processingStatus') THEN ALTER TABLE frame RENAME COLUMN "processingStatus" TO processingstatus; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'frame' AND column_name = 'originalFilename') THEN ALTER TABLE frame RENAME COLUMN "originalFilename" TO originalfilename; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'frame' AND column_name = 'storageKey') THEN ALTER TABLE frame RENAME COLUMN "storageKey" TO storagekey; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'frame' AND column_name = 'sourceName') THEN ALTER TABLE frame RENAME COLUMN "sourceName" TO sourcename; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'frame' AND column_name = 'cameraName') THEN ALTER TABLE frame RENAME COLUMN "cameraName" TO cameraname; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'frame' AND column_name = 'observedAt') THEN ALTER TABLE frame RENAME COLUMN "observedAt" TO observedat; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'frame' AND column_name = 'exposureSeconds') THEN ALTER TABLE frame RENAME COLUMN "exposureSeconds" TO exposureseconds; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'frame' AND column_name = 'previewStorageKey') THEN ALTER TABLE frame RENAME COLUMN "previewStorageKey" TO previewstoragekey; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'frame' AND column_name = 'thumbnailStorageKey') THEN ALTER TABLE frame RENAME COLUMN "thumbnailStorageKey" TO thumbnailstoragekey; END IF;
+                  ALTER TABLE frame ALTER COLUMN sourcename TYPE TEXT;
+                END IF;
+
+                IF to_regclass('processedasset') IS NOT NULL THEN
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processedasset' AND column_name = 'storageKey') THEN ALTER TABLE processedasset RENAME COLUMN "storageKey" TO storagekey; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processedasset' AND column_name = 'previewStorageKey') THEN ALTER TABLE processedasset RENAME COLUMN "previewStorageKey" TO previewstoragekey; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processedasset' AND column_name = 'versionLabel') THEN ALTER TABLE processedasset RENAME COLUMN "versionLabel" TO versionlabel; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processedasset' AND column_name = 'uploadedBy') THEN ALTER TABLE processedasset RENAME COLUMN "uploadedBy" TO uploadedby; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processedasset' AND column_name = 'createdAt') THEN ALTER TABLE processedasset RENAME COLUMN "createdAt" TO createdat; END IF;
+                END IF;
+
+                IF to_regclass('processingjob') IS NOT NULL THEN
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processingjob' AND column_name = 'createdAt') THEN ALTER TABLE processingjob RENAME COLUMN "createdAt" TO createdat; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processingjob' AND column_name = 'startedAt') THEN ALTER TABLE processingjob RENAME COLUMN "startedAt" TO startedat; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processingjob' AND column_name = 'finishedAt') THEN ALTER TABLE processingjob RENAME COLUMN "finishedAt" TO finishedat; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processingjob' AND column_name = 'errorMessage') THEN ALTER TABLE processingjob RENAME COLUMN "errorMessage" TO errormessage; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processingjob' AND column_name = 'frameId') THEN ALTER TABLE processingjob RENAME COLUMN "frameId" TO frameid; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processingjob' AND column_name = 'sessionId') THEN ALTER TABLE processingjob RENAME COLUMN "sessionId" TO sessionid; END IF;
+                  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'processingjob' AND column_name = 'resultStorageKey') THEN ALTER TABLE processingjob RENAME COLUMN "resultStorageKey" TO resultstoragekey; END IF;
+                END IF;
+              END $$;
+
+  - changeSet:
+      id: 007-ensure-processingjob-table
+      author: astrovault
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            tableExists:
+              tableName: processingjob
+      changes:
+        - createSequence: { sequenceName: processingjob_seq, startValue: 1, incrementBy: 50 }
+        - createTable:
+            tableName: processingjob
+            columns:
+              - column: { name: id, type: BIGINT, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: type, type: VARCHAR(64) }
+              - column: { name: status, type: VARCHAR(64) }
+              - column: { name: createdat, type: TIMESTAMP }
+              - column: { name: startedat, type: TIMESTAMP }
+              - column: { name: finishedat, type: TIMESTAMP }
+              - column: { name: errormessage, type: VARCHAR(255) }
+              - column: { name: frameid, type: BIGINT }
+              - column: { name: sessionid, type: BIGINT }
+              - column: { name: resultstoragekey, type: VARCHAR(255) }

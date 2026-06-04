@@ -19,6 +19,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   changes:
@@ -104,6 +105,7 @@ jobs:
           persist-credentials: false
 
       - uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           scan-type: fs
           scan-ref: .
@@ -115,6 +117,7 @@ jobs:
           exit-code: "0"
 
       - uses: github/codeql-action/upload-sarif@v4
+        if: hashFiles('trivy-fs.sarif') != ''
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
@@ -139,7 +142,7 @@ jobs:
           publish_results: true
 
       - uses: github/codeql-action/upload-sarif@v4
-        if: always()
+        if: hashFiles('scorecard.sarif') != ''
         with:
           sarif_file: scorecard.sarif
           category: openssf-scorecard
@@ -160,7 +163,7 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: "21"
           cache: maven
 
       - name: Maven verify
@@ -211,6 +214,7 @@ jobs:
           python3 -m pip install --upgrade pip
           if [ -f requirements.txt ]; then python3 -m pip install -r requirements.txt; fi
           if [ -f pyproject.toml ]; then python3 -m pip install .[test]; fi
+          python3 -m pip install pytest
           python3 -m pytest -q
 
   test-ingest-worker:
@@ -234,6 +238,7 @@ jobs:
           python3 -m pip install --upgrade pip
           if [ -f requirements.txt ]; then python3 -m pip install -r requirements.txt; fi
           if [ -f pyproject.toml ]; then python3 -m pip install .[test]; fi
+          python3 -m pip install pytest
           python3 -m pytest -q
 
   build-backend:

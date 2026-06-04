@@ -11,3 +11,5 @@ databaseChangeLog:
       file: db/changelog/005-session-manual-workflow-status.yaml
   - include:
       file: db/changelog/006-frame-source-name-text.yaml
+  - include:
+      file: db/changelog/007-normalize-postgres-identifiers.yaml

@@ -1,6 +1,6 @@
 astropy==6.1.2
 minio==7.2.20
-numpy==2.0.1
+numpy==2.4.6
 pika==1.4.1
 pillow==10.4.0
 requests==2.34.2

@@ -9,29 +9,15 @@ import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
 import io.minio.Result;
 import io.minio.messages.Item;
-import io.quarkus.arc.lookup.LookupIfProperty;
-import jakarta.annotation.PostConstruct;
-import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-@ApplicationScoped
-@LookupIfProperty(name = "astrovault.storage.mode", stringValue = "minio")
 public class MinioStorageService implements StorageService {
-    @ConfigProperty(name = "astrovault.minio.endpoint")
-    String endpoint;
-    @ConfigProperty(name = "astrovault.minio.access-key")
-    String access;
-    @ConfigProperty(name = "astrovault.minio.secret-key")
-    String secret;
+    private final MinioClient client;
 
-    private MinioClient client;
-
-    @PostConstruct
-    void init() {
+    MinioStorageService(String endpoint, String access, String secret) {
         client = MinioClient.builder().endpoint(endpoint).credentials(access, secret).build();
     }
 
@@ -45,7 +31,7 @@ public class MinioStorageService implements StorageService {
         try {
             ensureBucket(bucket);
             client.putObject(PutObjectArgs.builder().bucket(bucket).object(key)
-                    .stream(content, size, -1)
+                    .stream(content, size, -1L)
                     .contentType(contentType)
                     .build());
             return key;

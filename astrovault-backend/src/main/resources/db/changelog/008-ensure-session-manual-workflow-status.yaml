@@ -1,0 +1,17 @@
+databaseChangeLog:
+  - changeSet:
+      id: 008-ensure-session-manual-workflow-status
+      author: astrovault
+      preConditions:
+        - onFail: MARK_RAN
+        - tableExists:
+            tableName: ImagingSession
+        - not:
+            columnExists:
+              tableName: ImagingSession
+              columnName: manualWorkflowStatus
+      changes:
+        - addColumn:
+            tableName: ImagingSession
+            columns:
+              - column: { name: manualWorkflowStatus, type: VARCHAR(64) }

@@ -15,11 +15,12 @@ def test_collect_fits_with_mocked_smb(monkeypatch):
     }
 
     monkeypatch.setattr(ingest_worker, "listdir", lambda p: tree.get(p, []))
-    monkeypatch.setattr(ingest_worker.smbpath, "join", lambda a, b: f"{a}\\{b}")
     monkeypatch.setattr(ingest_worker.smbpath, "isdir", lambda p: p in tree)
     monkeypatch.setattr(ingest_worker, "lstat", lambda p: FakeStat(p in tree))
 
-    out = ingest_worker.collect_fits("\\\\h\\s")
-    assert "\\\\h\\s\\a.fits" in out
-    assert "\\\\h\\s\\sub\\c.fit" in out
-    assert all(not x.endswith(".txt") for x in out)
+    out, stats = ingest_worker.collect_fits("\\\\h\\s", max_depth=8)
+    paths = {item.remote for item in out}
+    assert "\\\\h\\s\\a.fits" in paths
+    assert "\\\\h\\s\\sub\\c.fit" in paths
+    assert all(not path.endswith(".txt") for path in paths)
+    assert stats.fits_candidates == 2

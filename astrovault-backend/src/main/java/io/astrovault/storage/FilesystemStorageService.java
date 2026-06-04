@@ -1,6 +1,5 @@
 package io.astrovault.storage;
 
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -11,8 +10,11 @@ import java.util.List;
 
 public class FilesystemStorageService implements StorageService {
 
-    @ConfigProperty(name = "astrovault.storage.base-path")
-    String basePath;
+    private final String basePath;
+
+    FilesystemStorageService(String basePath) {
+        this.basePath = basePath;
+    }
 
     @Override
     public String put(String bucket, String key, byte[] content, String contentType) {

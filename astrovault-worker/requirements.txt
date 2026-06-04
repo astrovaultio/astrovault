@@ -3,4 +3,4 @@ minio==7.2.7
 numpy==2.0.1
 pika==1.4.1
 pillow==10.4.0
-requests==2.32.3
+requests==2.34.2

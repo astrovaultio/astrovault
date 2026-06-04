@@ -69,7 +69,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: high
           deny-licenses: GPL-2.0, LGPL-2.0

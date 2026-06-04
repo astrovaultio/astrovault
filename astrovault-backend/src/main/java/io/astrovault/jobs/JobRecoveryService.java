@@ -20,6 +20,7 @@ import java.util.List;
 public class JobRecoveryService {
     private static final Logger LOG = Logger.getLogger(JobRecoveryService.class);
     private static final List<JobType> FRAME_JOB_TYPES = List.of(JobType.METADATA_EXTRACTION, JobType.PREVIEW_GENERATION);
+    private static final List<JobType> TARGET_JOB_TYPES = List.of(JobType.TARGET_ENRICHMENT);
 
     @Inject
     JobQueue jobQueue;
@@ -53,6 +54,26 @@ public class JobRecoveryService {
                 frame.processingStatus = FrameProcessingStatus.PENDING;
             }
             enqueue(job, "stale-running");
+        }
+
+        List<ProcessingJob> pendingTargets = ProcessingJob.list("status = ?1 and type in ?2 and targetId is not null", JobStatus.PENDING, TARGET_JOB_TYPES);
+        for (ProcessingJob job : pendingTargets) {
+            enqueue(job, "pending-target");
+        }
+
+        List<ProcessingJob> staleRunningTargets = ProcessingJob.list(
+                "status = ?1 and type in ?2 and targetId is not null and startedAt is not null and startedAt < ?3",
+                JobStatus.RUNNING,
+                TARGET_JOB_TYPES,
+                cutoff
+        );
+        for (ProcessingJob job : staleRunningTargets) {
+            LOG.warnf("Recovering stale running target job jobId=%s type=%s targetId=%s startedAt=%s", job.id, job.type, job.targetId, job.startedAt);
+            job.status = JobStatus.PENDING;
+            job.startedAt = null;
+            job.finishedAt = null;
+            job.errorMessage = null;
+            enqueue(job, "stale-running-target");
         }
     }
 

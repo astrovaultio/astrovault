@@ -3,8 +3,11 @@ import logging
 import os
 import re
 import time
+import csv
 from dataclasses import dataclass
-from io import BytesIO
+from functools import lru_cache
+from io import BytesIO, StringIO
+from urllib.parse import quote
 
 import numpy as np
 import pika
@@ -18,10 +21,22 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [worker] %(message)s",
 )
 LOG = logging.getLogger("astrovault.worker")
+DEFAULT_OPENNGC_URL = "https://raw.githubusercontent.com/mattiaverga/OpenNGC/refs/heads/master/database_files/NGC.csv"
+WIKIPEDIA_USER_AGENT = os.getenv(
+    "ASTROVAULT_WIKIPEDIA_USER_AGENT",
+    "AstroVault/0.1 target-enrichment (https://github.com/Eluminat001/astrovault)",
+)
+KNOWN_NAMED_TARGETS = {
+    "MARKARIANSCHAIN": "Markarian's Chain",
+}
 
 
 class PermanentJobError(Exception):
     pass
+
+
+def is_missing_raw_object_error(exc: Exception) -> bool:
+    return exc.__class__.__name__ == "S3Error" and getattr(exc, "code", None) == "NoSuchKey"
 
 
 @dataclass
@@ -35,6 +50,8 @@ class Config:
     minio_secure: bool = os.getenv("ASTROVAULT_MINIO_SECURE", "false").lower() == "true"
     technical_retry_count: int = int(os.getenv("ASTROVAULT_WORKER_TECH_RETRIES", "3"))
     technical_retry_delay_seconds: float = float(os.getenv("ASTROVAULT_WORKER_TECH_RETRY_DELAY_SECONDS", "2"))
+    openngc_url: str = os.getenv("ASTROVAULT_OPENNGC_URL", DEFAULT_OPENNGC_URL)
+    wikipedia_enabled: bool = os.getenv("ASTROVAULT_WIKIPEDIA_ENRICHMENT_ENABLED", "false").lower() == "true"
 
 
 def normalize_frame_type(value: str | None) -> str:
@@ -81,6 +98,275 @@ def parse_source_metadata(source_name: str | None) -> dict:
         if match:
             target = match.group(1).strip() or None
     return {"object": target}
+
+
+def normalize_target_name(value: str | None) -> str:
+    if not value:
+        return ""
+    trimmed = re.sub(r"\s+", " ", value.strip().replace("_", " ").replace("-", " "))
+    if not trimmed:
+        return ""
+    alias = KNOWN_NAMED_TARGETS.get(catalog_key(trimmed))
+    if alias:
+        return alias
+    messier = re.match(r"^(?:MESSIER\s*)?M\s*0*(\d+)$", trimmed, re.IGNORECASE)
+    if messier:
+        return f"M{int(messier.group(1))}"
+    catalog = re.match(r"^(NGC|IC)\s*0*(\d+)$", trimmed, re.IGNORECASE)
+    if catalog:
+        return f"{catalog.group(1).upper()}{int(catalog.group(2))}"
+    return trimmed
+
+
+def catalog_key(value: str | None) -> str:
+    return re.sub(r"\s+", "", value or "").upper()
+
+
+def normalized_catalog_key(value: str | None) -> str:
+    return catalog_key(normalize_target_name(value))
+
+
+def is_known_named_target(value: str | None) -> bool:
+    return catalog_key(value) in KNOWN_NAMED_TARGETS or normalized_catalog_key(value) in KNOWN_NAMED_TARGETS
+
+
+def strip_leading_zeros(value: str | None) -> str | None:
+    if value is None or not str(value).strip():
+        return None
+    try:
+        return str(int(str(value).strip()))
+    except ValueError:
+        return str(value).strip()
+
+
+def first_present(row: dict, *names: str) -> str | None:
+    for name in names:
+        value = row.get(name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def parse_number(value: str | None) -> float | None:
+    if value is None or not str(value).strip():
+        return None
+    try:
+        return float(str(value).strip())
+    except ValueError:
+        return None
+
+
+def parse_sexagesimal(value: str | None, *, hours: bool) -> float | None:
+    if value is None or not str(value).strip():
+        return None
+    text = str(value).strip()
+    parts = text.split(":")
+    if len(parts) != 3:
+        return parse_number(value)
+    try:
+        first = float(parts[0])
+        sign = -1 if text.startswith("-") else 1
+        total = abs(first) + (float(parts[1]) / 60.0) + (float(parts[2]) / 3600.0)
+        return sign * total * (15.0 if hours else 1.0)
+    except ValueError:
+        return None
+
+
+def catalog_name(row: dict) -> str | None:
+    messier = strip_leading_zeros(row.get("M"))
+    if messier:
+        return f"M{messier}"
+    ngc = strip_leading_zeros(row.get("NGC"))
+    if ngc:
+        return f"NGC{ngc}"
+    ic = strip_leading_zeros(row.get("IC"))
+    if ic:
+        return f"IC{ic}"
+    return None
+
+
+def catalog_ids(row: dict) -> str | None:
+    values = []
+    for prefix in ("M", "NGC", "IC"):
+        identifier = strip_leading_zeros(row.get(prefix))
+        if identifier:
+            values.append(f"{prefix}{identifier}")
+    return ", ".join(values) or None
+
+
+def row_to_enrichment(row: dict, source_reference: str) -> dict:
+    canonical = first_present(row, "Name", "name") or catalog_name(row)
+    return {
+        "canonicalName": canonical,
+        "objectType": first_present(row, "Type", "type"),
+        "catalogIds": catalog_ids(row),
+        "constellation": first_present(row, "Const", "Constellation", "constellation"),
+        "ra": parse_sexagesimal(first_present(row, "RA", "ra"), hours=True),
+        "dec": parse_sexagesimal(first_present(row, "Dec", "DEC", "dec"), hours=False),
+        "magnitude": parse_number(first_present(row, "V-Mag", "B-Mag", "J-Mag", "Mag", "mag", "magnitude")),
+        "apparentSize": first_present(row, "MajAx", "Size", "apparentSize"),
+        "distance": None,
+        "description": None,
+        "source": "OpenNGC",
+        "sourceReference": source_reference,
+    }
+
+
+@lru_cache(maxsize=4)
+def load_openngc_catalog(url: str) -> dict:
+    if not url:
+        return {}
+    rows = {}
+    try:
+        response = requests.get(url, headers={"Accept": "text/csv,*/*"}, timeout=20)
+        response.raise_for_status()
+        sample = response.text[:4096]
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;")
+        except csv.Error:
+            dialect = csv.excel()
+            dialect.delimiter = ";"
+        for row in csv.DictReader(StringIO(response.text), dialect=dialect):
+            data = row_to_enrichment(row, url)
+            canonical = data.get("canonicalName")
+            if canonical:
+                rows[catalog_key(canonical)] = data
+                rows[normalized_catalog_key(canonical)] = data
+            for prefix in ("M", "NGC", "IC"):
+                identifier = strip_leading_zeros(row.get(prefix))
+                if identifier:
+                    rows[catalog_key(f"{prefix}{identifier}")] = data
+        LOG.info("OpenNGC catalog loaded url=%s lookupKeys=%s", url, len(rows))
+    except Exception as exc:
+        LOG.warning("Unable to load OpenNGC catalog url=%s error=%s", url, exc)
+        return {}
+    return rows
+
+
+def wikipedia_candidates(enrichment: dict) -> list[str]:
+    values = []
+    canonical = enrichment.get("canonicalName")
+    if canonical:
+        values.append(str(canonical))
+    for catalog_id in (enrichment.get("catalogIds") or "").split(","):
+        value = catalog_id.strip()
+        if not value:
+            continue
+        values.append(value)
+        messier = re.match(r"^M(\d+)$", value, re.IGNORECASE)
+        if messier:
+            values.append(f"Messier {int(messier.group(1))}")
+    deduped = []
+    seen = set()
+    for value in values:
+        key = catalog_key(value)
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(value)
+    return deduped[:5]
+
+
+def wikipedia_summary(cfg: Config, candidates: list[str]) -> tuple[str, str] | None:
+    if not cfg.wikipedia_enabled or not candidates:
+        LOG.debug("Wikipedia summary skipped enabled=%s candidates=%s", cfg.wikipedia_enabled, candidates)
+        return None
+    for candidate in candidates:
+        try:
+            LOG.info("Wikipedia summary lookup started candidate=%s", candidate)
+            title = quote(candidate.replace(" ", "_"), safe="")
+            response = requests.get(
+                f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}",
+                headers={"Accept": "application/json", "User-Agent": WIKIPEDIA_USER_AGENT},
+                timeout=10,
+            )
+            if response.status_code != 200:
+                LOG.info("Wikipedia summary lookup returned status=%s candidate=%s", response.status_code, candidate)
+                continue
+            body = response.json()
+            if body.get("type") == "disambiguation":
+                LOG.info("Wikipedia summary skipped disambiguation candidate=%s", candidate)
+                continue
+            description = body.get("extract")
+            source_url = (((body.get("content_urls") or {}).get("desktop") or {}).get("page"))
+            if not description:
+                LOG.info("Wikipedia summary lookup had no extract candidate=%s", candidate)
+                continue
+            LOG.info("Wikipedia summary lookup succeeded candidate=%s sourceUrl=%s", candidate, source_url)
+            return description, source_url
+        except Exception as exc:
+            LOG.info("Wikipedia summary lookup failed candidate=%s error=%s", candidate, exc)
+    return None
+
+
+def enrich_target(cfg: Config, target: dict) -> dict:
+    normalized = normalize_target_name(target.get("name"))
+    lookup_key = catalog_key(normalized)
+    LOG.info(
+        "Target enrichment started targetId=%s name=%s normalized=%s openNgcConfigured=%s wikipediaEnabled=%s",
+        target.get("id"),
+        target.get("name"),
+        normalized,
+        bool(cfg.openngc_url),
+        cfg.wikipedia_enabled,
+    )
+    enrichment = load_openngc_catalog(cfg.openngc_url).get(lookup_key)
+    catalog_matched = enrichment is not None
+    if enrichment is None:
+        LOG.info("Target enrichment catalog miss targetId=%s lookupKey=%s", target.get("id"), lookup_key)
+        enrichment = {
+            "canonicalName": normalized or target.get("name"),
+            "objectType": None,
+            "catalogIds": None,
+            "constellation": None,
+            "ra": target.get("ra"),
+            "dec": target.get("dec"),
+            "magnitude": None,
+            "apparentSize": None,
+            "distance": None,
+            "description": None,
+            "source": "Not available",
+            "sourceReference": None,
+        }
+    else:
+        enrichment = dict(enrichment)
+        LOG.info(
+            "Target enrichment catalog match targetId=%s lookupKey=%s canonicalName=%s catalogIds=%s source=%s",
+            target.get("id"),
+            lookup_key,
+            enrichment.get("canonicalName"),
+            enrichment.get("catalogIds"),
+            enrichment.get("source"),
+        )
+        enrichment["ra"] = enrichment.get("ra") if enrichment.get("ra") is not None else target.get("ra")
+        enrichment["dec"] = enrichment.get("dec") if enrichment.get("dec") is not None else target.get("dec")
+
+    allow_named_summary = is_known_named_target(target.get("name"))
+    summary = wikipedia_summary(cfg, wikipedia_candidates(enrichment)) if catalog_matched or allow_named_summary else None
+    if not catalog_matched and cfg.wikipedia_enabled and not allow_named_summary:
+        LOG.info("Wikipedia summary skipped targetId=%s reason=catalog-miss canonicalName=%s", target.get("id"), enrichment.get("canonicalName"))
+    if summary is not None:
+        description, source_url = summary
+        enrichment["description"] = description
+        enrichment["source"] = merge_source(enrichment.get("source"), "Wikipedia summary")
+        enrichment["sourceReference"] = merge_source(enrichment.get("sourceReference"), source_url)
+    LOG.info(
+        "Target enrichment completed targetId=%s canonicalName=%s source=%s hasDescription=%s",
+        target.get("id"),
+        enrichment.get("canonicalName"),
+        enrichment.get("source"),
+        bool(enrichment.get("description")),
+    )
+    return enrichment
+
+
+def merge_source(left: str | None, right: str | None) -> str | None:
+    if not left:
+        return right
+    if not right:
+        return left
+    if right in left:
+        return left
+    return f"{left}; {right}"
 
 
 def extract_metadata(fits_bytes: bytes, original_filename: str | None = None, source_name: str | None = None) -> tuple[dict, str]:
@@ -223,9 +509,10 @@ def backend_json(response: requests.Response, label: str) -> dict:
 
 def process_job(cfg: Config, minio_client: Minio, job: dict) -> None:
     job_id = int(job["id"])
-    frame_id = int(job["frameId"])
     job_type = job["type"]
-    LOG.info("Processing job id=%s type=%s frameId=%s", job_id, job_type, frame_id)
+    frame_id = int(job["frameId"]) if job.get("frameId") is not None else None
+    target_id = int(job["targetId"]) if job.get("targetId") is not None else None
+    LOG.info("Processing job id=%s type=%s frameId=%s targetId=%s", job_id, job_type, frame_id, target_id)
     try:
         current = backend_json(requests.get(
             f"{cfg.backend_url}/internal/worker/jobs/{job_id}",
@@ -236,13 +523,52 @@ def process_job(cfg: Config, minio_client: Minio, job: dict) -> None:
             LOG.warning("Skipping already finished job id=%s status=%s", job_id, current.get("status"))
             return
         set_job_status(cfg, job_id, "RUNNING")
+        if job_type == "TARGET_ENRICHMENT":
+            if target_id is None:
+                raise PermanentJobError(f"Target enrichment job {job_id} has no targetId")
+            LOG.info("Target enrichment job loading target jobId=%s targetId=%s", job_id, target_id)
+            target = backend_json(requests.get(
+                f"{cfg.backend_url}/internal/worker/targets/{target_id}",
+                headers={"X-Worker-Token": cfg.worker_token},
+                timeout=20,
+            ), f"target {target_id}")
+            LOG.info("Target enrichment job loaded target jobId=%s targetId=%s name=%s", job_id, target_id, target.get("name"))
+            enrichment = enrich_target(cfg, target)
+            LOG.info(
+                "Target enrichment callback posting jobId=%s targetId=%s canonicalName=%s source=%s",
+                job_id,
+                target_id,
+                enrichment.get("canonicalName"),
+                enrichment.get("source"),
+            )
+            requests.post(
+                f"{cfg.backend_url}/internal/worker/targets/{target_id}/enrichment",
+                headers={"X-Worker-Token": cfg.worker_token},
+                json=enrichment,
+                timeout=20,
+            ).raise_for_status()
+            LOG.info("Target enrichment callback succeeded jobId=%s targetId=%s source=%s", job_id, target_id, enrichment.get("source"))
+            set_job_status(cfg, job_id, "COMPLETED")
+            LOG.info("Job completed id=%s", job_id)
+            return
+
+        if frame_id is None:
+            raise PermanentJobError(f"Frame job {job_id} has no frameId")
         frame = backend_json(requests.get(
             f"{cfg.backend_url}/internal/worker/frames/{frame_id}",
             headers={"X-Worker-Token": cfg.worker_token},
             timeout=20,
         ), f"frame {frame_id}")
         LOG.debug("Loaded frame worker view id=%s storageKey=%s", frame.get("id"), frame.get("storageKey"))
-        raw = minio_client.get_object("raw", frame["storageKey"]).read()
+        storage_key = frame.get("storageKey")
+        if not storage_key:
+            raise PermanentJobError(f"Frame {frame_id} has no raw storage key")
+        try:
+            raw = minio_client.get_object("raw", storage_key).read()
+        except Exception as exc:
+            if is_missing_raw_object_error(exc):
+                raise PermanentJobError(f"Raw object is missing from bucket=raw key={storage_key}") from exc
+            raise
         LOG.debug("Fetched raw FITS bytes frameId=%s size=%s", frame_id, len(raw))
 
         if job_type == "METADATA_EXTRACTION":
@@ -273,7 +599,7 @@ def process_job(cfg: Config, minio_client: Minio, job: dict) -> None:
         set_job_status(cfg, job_id, "COMPLETED")
         LOG.info("Job completed id=%s", job_id)
     except PermanentJobError as exc:
-        LOG.error("Job permanently failed id=%s type=%s frameId=%s error=%s", job_id, job_type, frame_id, exc, exc_info=True)
+        LOG.error("Job permanently failed id=%s type=%s frameId=%s targetId=%s error=%s", job_id, job_type, frame_id, target_id, exc, exc_info=True)
         try:
             set_job_status(cfg, job_id, "FAILED", str(exc))
         except Exception as status_exc:
@@ -281,7 +607,7 @@ def process_job(cfg: Config, minio_client: Minio, job: dict) -> None:
             raise status_exc from exc
         raise
     except Exception as exc:
-        LOG.error("Job transient failure id=%s type=%s frameId=%s error=%s", job_id, job_type, frame_id, exc, exc_info=True)
+        LOG.error("Job transient failure id=%s type=%s frameId=%s targetId=%s error=%s", job_id, job_type, frame_id, target_id, exc, exc_info=True)
         raise
 
 

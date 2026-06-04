@@ -8,6 +8,8 @@ import io.astrovault.domain.FrameType;
 import io.astrovault.domain.ImagingSession;
 import io.astrovault.domain.JobStatus;
 import io.astrovault.domain.ProcessingJob;
+import io.astrovault.domain.Target;
+import io.astrovault.domain.TargetEnrichment;
 import io.astrovault.ingest.FitsHeaderInfo;
 import io.astrovault.ingest.SessionAssignmentService;
 import jakarta.inject.Inject;
@@ -54,6 +56,21 @@ public class WorkerCallbackResource {
     public record MetadataUpdateRequest(String metadata, String frameType) {}
     public record PreviewUpdateRequest(String previewStorageKey, String thumbnailStorageKey) {}
     public record FrameWorkerView(Long id, String storageKey, String checksum, String originalFilename, String sourceName) {}
+    public record TargetWorkerView(Long id, String name, Double ra, Double dec, String notes) {}
+    public record TargetEnrichmentUpdateRequest(
+            String canonicalName,
+            String objectType,
+            String catalogIds,
+            String constellation,
+            Double ra,
+            Double dec,
+            Double magnitude,
+            String apparentSize,
+            String distance,
+            String description,
+            String source,
+            String sourceReference
+    ) {}
 
     @GET
     @Path("/jobs/{jobId}")
@@ -84,6 +101,22 @@ public class WorkerCallbackResource {
         }
         LOG.debugf("Worker frameInfo served frameId=%s storageKey=%s", frame.id, frame.storageKey);
         return Response.ok(new FrameWorkerView(frame.id, frame.storageKey, frame.checksum, frame.originalFilename, frame.sourceName)).build();
+    }
+
+    @GET
+    @Path("/targets/{targetId}")
+    public Response targetInfo(@HeaderParam("X-Worker-Token") String token, @PathParam("targetId") Long targetId) {
+        if (!workerToken.equals(token)) {
+            LOG.warnf("Unauthorized targetInfo callback targetId=%s", targetId);
+            return Response.status(Response.Status.UNAUTHORIZED).build();
+        }
+        Target target = Target.findById(targetId);
+        if (target == null) {
+            LOG.warnf("Target not found for worker targetInfo targetId=%s", targetId);
+            return Response.status(Response.Status.NOT_FOUND).build();
+        }
+        LOG.debugf("Worker targetInfo served targetId=%s name=%s", target.id, target.name);
+        return Response.ok(new TargetWorkerView(target.id, target.name, target.ra, target.dec, target.notes)).build();
     }
 
     @POST
@@ -209,6 +242,42 @@ public class WorkerCallbackResource {
         updateFrameProcessingStatus(frameId);
         LOG.infof("Preview callback applied frameId=%s preview=%s thumb=%s", frame.id, req.previewStorageKey(), req.thumbnailStorageKey());
         return Response.ok(frame).build();
+    }
+
+    @POST
+    @Path("/targets/{targetId}/enrichment")
+    @Transactional
+    public Response updateTargetEnrichment(@HeaderParam("X-Worker-Token") String token, @PathParam("targetId") Long targetId, TargetEnrichmentUpdateRequest req) {
+        if (!workerToken.equals(token)) {
+            LOG.warnf("Unauthorized target enrichment callback targetId=%s", targetId);
+            return Response.status(Response.Status.UNAUTHORIZED).build();
+        }
+        Target target = Target.findById(targetId);
+        if (target == null) {
+            LOG.warnf("Target enrichment callback for unknown target targetId=%s", targetId);
+            return Response.status(Response.Status.NOT_FOUND).build();
+        }
+        TargetEnrichment enrichment = TargetEnrichment.find("target.id", targetId).firstResult();
+        if (enrichment == null) {
+            enrichment = new TargetEnrichment();
+            enrichment.target = target;
+        }
+        enrichment.canonicalName = req.canonicalName();
+        enrichment.objectType = req.objectType();
+        enrichment.catalogIds = req.catalogIds();
+        enrichment.constellation = req.constellation();
+        enrichment.ra = req.ra() == null ? target.ra : req.ra();
+        enrichment.dec = req.dec() == null ? target.dec : req.dec();
+        enrichment.magnitude = req.magnitude();
+        enrichment.apparentSize = req.apparentSize();
+        enrichment.distance = req.distance();
+        enrichment.description = req.description();
+        enrichment.source = req.source();
+        enrichment.sourceReference = req.sourceReference();
+        enrichment.lastUpdated = Instant.now();
+        enrichment.persist();
+        LOG.infof("Target enrichment callback applied targetId=%s source=%s", target.id, req.source());
+        return Response.ok(enrichment).build();
     }
 
     private FitsHeaderInfo extractInfo(String metadata, Instant fallbackObservedAt) {

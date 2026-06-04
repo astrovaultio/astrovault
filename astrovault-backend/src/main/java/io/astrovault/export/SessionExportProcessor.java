@@ -8,8 +8,10 @@ import io.astrovault.domain.JobType;
 import io.astrovault.domain.ProcessingJob;
 import io.astrovault.storage.StorageService;
 import io.quarkus.narayana.jta.QuarkusTransaction;
+import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 
 import java.io.InputStream;
@@ -20,6 +22,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -27,13 +30,25 @@ import java.util.zip.ZipOutputStream;
 @ApplicationScoped
 public class SessionExportProcessor {
 
+    private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
+
     @Inject
     StorageService storageService;
 
+    void onShutdown(@Observes ShutdownEvent event) {
+        shuttingDown.set(true);
+    }
+
     @Scheduled(every = "5s")
     void processPendingExports() {
+        if (shuttingDown.get()) {
+            return;
+        }
         List<Long> jobIds = QuarkusTransaction.requiringNew().call(this::pendingJobIds);
         for (Long jobId : jobIds) {
+            if (shuttingDown.get()) {
+                return;
+            }
             run(jobId);
         }
     }

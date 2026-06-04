@@ -266,6 +266,25 @@ function StatusBadge({ status }: { status?: string }) {
   return <Badge color={color} variant="light">{status ?? "Not recorded"}</Badge>;
 }
 
+const enrichmentFact = (value?: string | number | null) => value === undefined || value === null || value === "" ? "Not available" : String(value);
+
+function EnrichmentDescriptionDisclosure({ description, source }: { description?: string | null; source?: string | null }) {
+  const [opened, setOpened] = useState(false);
+  const available = !!description?.trim();
+  const sourceLabel = source?.includes("Wikipedia") ? "Wikipedia summary" : "Catalog description";
+  return (
+    <Card p="sm" radius="md" withBorder mt="sm">
+      <Group justify="space-between" align="center">
+        <div><Text fw={800} size="sm">Object description</Text><Text c="dimmed" size="xs">{available ? sourceLabel : "Not available"}</Text></div>
+        <Button size="xs" variant="light" disabled={!available} onClick={() => setOpened((value) => !value)}>{opened ? "Hide" : "Show"}</Button>
+      </Group>
+      {opened ? (
+        <Text mt="sm" size="sm" c="dimmed">{description}</Text>
+      ) : null}
+    </Card>
+  );
+}
+
 const sessionWorkflowSteps = (frames: Frame[], results: ProcessedAsset[]) => {
   const counts = frameTypeCounts(frames);
   const hasLights = (counts.LIGHT ?? 0) > 0;
@@ -937,6 +956,7 @@ function SessionsPage({
                   const typeCounts = frameTypeCounts(rowFrames);
                   const camera = isGroup ? "Multiple cameras" : sessionCamera(rowFrames);
                   const filter = isGroup ? "Multiple filters" : sessionFilter(rowFrames);
+                  const enrichment = isGroup ? row.sessions.find((s) => s.targetEnrichment)?.targetEnrichment : row.session.targetEnrichment;
                   return (
                     <Card key={isGroup ? `group-${row.key}` : row.session.id} className="session-card astro-session-card" radius="lg" p="lg" withBorder>
                       <Group justify="space-between" align="flex-start">
@@ -954,11 +974,17 @@ function SessionsPage({
                         <Paper className="empty-state" p="sm" radius="md"><Text size="xs" c="dimmed">Camera</Text><Text fw={800} size="sm" truncate>{camera}</Text></Paper>
                         <Paper className="empty-state" p="sm" radius="md"><Text size="xs" c="dimmed">Filter</Text><Text fw={800} size="sm" truncate>{filter}</Text></Paper>
                       </SimpleGrid>
+                      <SimpleGrid cols={2} spacing="xs" mt="xs">
+                        <Paper className="empty-state" p="sm" radius="md"><Text size="xs" c="dimmed">Catalog</Text><Text fw={800} size="sm" truncate>{enrichmentFact(enrichment?.canonicalName ?? (!isGroup ? row.session.target?.name : undefined))}</Text></Paper>
+                        <Paper className="empty-state" p="sm" radius="md"><Text size="xs" c="dimmed">Object</Text><Text fw={800} size="sm" truncate>{enrichmentFact(enrichment?.objectType)}</Text></Paper>
+                      </SimpleGrid>
                       <Group mt="md" gap="xs">
                         <Badge variant="light">{typeCounts.LIGHT ?? 0} Lights</Badge>
                         <Badge variant="light">{typeCounts.DARK ?? 0} Darks</Badge>
                         <Badge variant="light">{typeCounts.FLAT ?? 0} Flats</Badge>
                         <Badge variant="light">{typeCounts.BIAS ?? 0} Bias</Badge>
+                        {enrichment?.constellation ? <Badge variant="light">{enrichment.constellation}</Badge> : null}
+                        {enrichment?.magnitude != null ? <Badge variant="light">Mag {enrichment.magnitude}</Badge> : null}
                       </Group>
                       <Group mt="md" justify="space-between">
                         <Text fw={900}>{fmtSeconds(integrationForRow, settings.integrationTimeFormat)} Integration</Text>
@@ -1129,6 +1155,7 @@ function SessionDetail({
   const filter = sessionFilter(sessionFrames);
   const workflow: WorkflowStatus = d?.workflowStatus ?? workflowSummary(sessionFrames, processedAssets);
   if (!session) return <Text c="dimmed">Loading session...</Text>;
+  const enrichment = session.targetEnrichment;
   const setManualWorkflowStatus = async (manualWorkflowStatus: string) => {
     await api(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ manualWorkflowStatus }) });
     await load();
@@ -1192,6 +1219,19 @@ function SessionDetail({
                   <Paper className="empty-state" p="lg" radius="md"><Text c="dimmed" size="sm">Camera</Text><Title order={4}>{camera}</Title></Paper>
                   <Paper className="empty-state" p="lg" radius="md"><Text c="dimmed" size="sm">Filter</Text><Title order={4}>{filter}</Title></Paper>
                 </SimpleGrid>
+                <Card className="empty-state" radius="md" p="lg" mt="md">
+                  <Group justify="space-between" align="flex-start" mb="sm"><div><Text fw={900}>Target Metadata</Text><Text c="dimmed" size="sm">Cached enrichment for this session target. Missing values are not inferred.</Text></div><Badge variant="light">Source: {enrichmentFact(enrichment?.source)}</Badge></Group>
+                  <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
+                    <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Canonical name</Text><Text fw={700}>{enrichmentFact(enrichment?.canonicalName ?? session.target?.name)}</Text></Paper>
+                    <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Object type</Text><Text fw={700}>{enrichmentFact(enrichment?.objectType)}</Text></Paper>
+                    <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Catalog identifiers</Text><Text fw={700}>{enrichmentFact(enrichment?.catalogIds)}</Text></Paper>
+                    <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Constellation</Text><Text fw={700}>{enrichmentFact(enrichment?.constellation)}</Text></Paper>
+                    <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Coordinates</Text><Text fw={700}>RA {enrichmentFact(enrichment?.ra)} / Dec {enrichmentFact(enrichment?.dec)}</Text></Paper>
+                    <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Magnitude</Text><Text fw={700}>{enrichmentFact(enrichment?.magnitude)}</Text></Paper>
+                  </SimpleGrid>
+                  <Group mt="sm" gap="xs"><Badge variant="light">Updated: {enrichment?.lastUpdated ? fmtDate(enrichment.lastUpdated) : "Not available"}</Badge>{enrichment?.apparentSize ? <Badge variant="light">Size: {enrichment.apparentSize}</Badge> : null}</Group>
+                  <EnrichmentDescriptionDisclosure description={enrichment?.description} source={enrichment?.source} />
+                </Card>
                 <Card className="empty-state" radius="md" p="lg" mt="md">
                   <Group justify="space-between" align="flex-start"><div><Text fw={900}>Session Intelligence</Text><Text c="dimmed" size="sm">Auto-grouped by Target, Camera, and Time Window.</Text></div><Badge color={session.logicalGroupKey ? "green" : "blue"} variant="light">{session.logicalGroupKey ? "High confidence" : "Manual session"}</Badge></Group>
                   <Group mt="md" gap="xs"><Button size="xs" variant="light" disabled>Move Frame</Button><Button size="xs" variant="light" disabled>Detach Frame</Button><Button size="xs" variant="light" disabled>Merge Sessions</Button><Button size="xs" variant="light" disabled>Split Session</Button>{session.logicalGroupKey ? <Button size="xs" variant="light" onClick={() => nav(`/session-groups/${encodeURIComponent(session.logicalGroupKey!)}`)}>Open Group</Button> : null}</Group>
@@ -1417,6 +1457,7 @@ function TargetsPage({
   const [targetDetail, setTargetDetail] = useState<TargetDetailData | null>(null);
   const [selectedResult, setSelectedResult] = useState<ProcessedAsset | null>(null);
   const [activeTargetTab, setActiveTargetTab] = useState<string | null>("overview");
+  const [refreshingEnrichment, setRefreshingEnrichment] = useState(false);
   const [q, setQ] = useState("");
   const [sortBy, setSortBy] = useState<"date-desc" | "date-asc" | "name-asc" | "name-desc">("date-desc");
   const [page, setPage] = useState(1);
@@ -1519,6 +1560,19 @@ function TargetsPage({
   const latestResult = targetDetail?.latestResult ?? [...targetAssets].sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())[0];
   const recentTargetSessions = forTarget.slice(0, 4);
   const timeline = targetDetail?.timeline ?? forTarget.slice().reverse().map((s) => ({ sessionId: s.id, startTime: s.startTime, endTime: s.endTime, integrationTime: s.totalIntegrationTime, frameCount: frames.filter((f) => f.session?.id === s.id).length, hasResult: targetAssets.some((a) => a.session?.id === s.id) }));
+  const enrichment = targetDetail?.enrichment;
+  const fact = (value?: string | number | null) => value === undefined || value === null || value === "" ? "Not available" : String(value);
+  const refreshEnrichment = async () => {
+    if (!selected) return;
+    setRefreshingEnrichment(true);
+    try {
+      await api(`/api/targets/${selected}/enrichment/refresh`, { method: "POST" });
+      notifications.show({ title: "Target enrichment queued", message: "AstroVault will refresh cached catalog data in the background.", color: "cyan" });
+      setTargetDetail(await (await api(`/api/targets/${selected}/detail`)).json());
+    } finally {
+      setRefreshingEnrichment(false);
+    }
+  };
   return (
     <Stack gap="lg">
       <PageHeader title="Targets" subtitle="Maintain your object catalog, observing history, and processed results." right={
@@ -1556,6 +1610,22 @@ function TargetsPage({
                     <Paper className="empty-state" p="sm" radius="md"><Text size="xs" c="dimmed">Total Frames</Text><Text fw={900}>{targetDetail?.stats.frames ?? targetFrames.length}</Text></Paper>
                     <Paper className="empty-state" p="sm" radius="md"><Text size="xs" c="dimmed">Total Integration</Text><Text fw={900}>{fmtSeconds(targetDetail?.stats.integrationTime ?? integration, settings.integrationTimeFormat)}</Text></Paper>
                   </SimpleGrid>
+                  <Card className="empty-state" radius="lg" p="md" withBorder>
+                    <Group justify="space-between" align="flex-start" mb="sm"><div><Text fw={900}>Astronomical Metadata</Text><Text c="dimmed" size="sm">Cached catalog enrichment. Missing values are not inferred.</Text></div><Button size="xs" variant="light" loading={refreshingEnrichment} onClick={() => void refreshEnrichment()}>Refresh metadata</Button></Group>
+                    <EnrichmentDescriptionDisclosure description={enrichment?.description} source={enrichment?.source} />
+                    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs" mt="md">
+                      <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Canonical name</Text><Text fw={700}>{fact(enrichment?.canonicalName ?? selectedTarget.name)}</Text></Paper>
+                      <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Object type</Text><Text fw={700}>{fact(enrichment?.objectType)}</Text></Paper>
+                      <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Catalog identifiers</Text><Text fw={700}>{fact(enrichment?.catalogIds)}</Text></Paper>
+                      <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Constellation</Text><Text fw={700}>{fact(enrichment?.constellation)}</Text></Paper>
+                      <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Coordinates</Text><Text fw={700}>RA {fact(enrichment?.ra ?? selectedTarget.ra)} / Dec {fact(enrichment?.dec ?? selectedTarget.dec)}</Text></Paper>
+                      <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Magnitude</Text><Text fw={700}>{fact(enrichment?.magnitude)}</Text></Paper>
+                      <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Apparent size</Text><Text fw={700}>{fact(enrichment?.apparentSize)}</Text></Paper>
+                      <Paper p="sm" radius="md" withBorder><Text size="xs" c="dimmed">Distance</Text><Text fw={700}>{fact(enrichment?.distance)}</Text></Paper>
+                    </SimpleGrid>
+                    <Group mt="sm" gap="xs"><Badge variant="light">Source: {fact(enrichment?.source)}</Badge><Badge variant="light">Updated: {enrichment?.lastUpdated ? fmtDate(enrichment.lastUpdated) : "Not available"}</Badge></Group>
+                    {enrichment?.sourceReference ? <Text mt="xs" size="xs" c="dimmed" component="a" href={enrichment.sourceReference.startsWith("http") ? enrichment.sourceReference : undefined} target="_blank" rel="noreferrer">Reference: {enrichment.sourceReference}</Text> : <Text mt="xs" size="xs" c="dimmed">Reference: Not available</Text>}
+                  </Card>
                   <div><Text fw={900} mb="xs">Imaging Timeline</Text>{timeline.length ? <Stack gap="xs">{timeline.map((item) => <Group key={item.sessionId} className="timeline-row" justify="space-between"><div><Text component={Link} to={`/sessions/${item.sessionId}`} className="table-link" fw={700}>{`${selectedTarget.name} • ${fmtShortDate(item.startTime)}`}</Text><Text c="dimmed" size="xs">{item.frameCount} frames · {item.hasResult ? "result available" : "needs result"}</Text></div><Badge variant="light">{fmtSeconds(item.integrationTime, settings.integrationTimeFormat)}</Badge></Group>)}</Stack> : <EmptyState title="No sessions found" message="Import frames from ASIAIR or create the first session for this target." />}</div>
                   <div><Text fw={900} mb="xs">Recent Sessions</Text>{recentTargetSessions.length ? <Stack gap="xs">{recentTargetSessions.map((s) => <Group key={s.id} className="compact-row" justify="space-between"><Text component={Link} to={`/sessions/${s.id}`} className="table-link" fw={700}>{sessionDisplayName(s)}</Text><Badge variant="light">{targetFrames.filter((f) => f.session?.id === s.id).length} frames</Badge></Group>)}</Stack> : <Text c="dimmed" size="sm">No capture nights yet.</Text>}</div>
                 </Stack>

@@ -14,9 +14,15 @@ import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @ApplicationScoped
 public class SessionAssignmentService {
+
+    private static final Map<String, String> KNOWN_TARGET_ALIASES = Map.of(
+            "markarianschain", "markarian's chain",
+            "markarian'schain", "markarian's chain"
+    );
 
     @ConfigProperty(name = "astrovault.session.gap-hours", defaultValue = "4")
     long sessionGapHours;
@@ -168,12 +174,52 @@ public class SessionAssignmentService {
         if (target == null || target.trim().isEmpty()) {
             return "unknown";
         }
-        return target.trim().toLowerCase(Locale.ROOT);
+        String trimmed = target.trim().replace('_', ' ').replace('-', ' ');
+        String compact = trimmed.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        String alias = KNOWN_TARGET_ALIASES.get(compact);
+        if (alias != null) {
+            return alias;
+        }
+        if (isLikelyEquipmentToken(compact)) {
+            return "unknown";
+        }
+        String messier = trimmed.replaceAll("(?i)^messier\\s*", "M");
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?i)^M\\s*0*(\\d+)$").matcher(messier);
+        if (m.matches()) {
+            return "m" + Integer.parseInt(m.group(1));
+        }
+        m = java.util.regex.Pattern.compile("(?i)^(NGC|IC)\\s*0*(\\d+)$").matcher(trimmed);
+        if (m.matches()) {
+            return m.group(1).toLowerCase(Locale.ROOT) + Integer.parseInt(m.group(2));
+        }
+        String normalized = trimmed.replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+        if (!normalized.matches(".*[a-z].*")) {
+            return "unknown";
+        }
+        return normalized;
+    }
+
+    private boolean isLikelyEquipmentToken(String compact) {
+        return compact.matches("\\d+(?:\\.\\d+)?(mm|cm|inch|in|deg|d|s|ms|sec|seconds)")
+                || compact.matches("f/?\\d+(?:\\.\\d+)?")
+                || compact.matches("gain\\d+")
+                || compact.matches("bin\\d+");
     }
 
     private String displayName(String normalized) {
         if ("unknown".equals(normalized)) {
             return "Unknown";
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^m(\\d+)$").matcher(normalized);
+        if (m.matches()) {
+            return "M" + Integer.parseInt(m.group(1));
+        }
+        m = java.util.regex.Pattern.compile("^(ngc|ic)(\\d+)$").matcher(normalized);
+        if (m.matches()) {
+            return m.group(1).toUpperCase(Locale.ROOT) + Integer.parseInt(m.group(2));
+        }
+        if ("markarian's chain".equals(normalized)) {
+            return "Markarian's Chain";
         }
         return normalized;
     }

@@ -3,9 +3,12 @@ package io.astrovault.api;
 import io.astrovault.domain.Frame;
 import io.astrovault.domain.ImagingSession;
 import io.astrovault.domain.JobStatus;
+import io.astrovault.domain.JobType;
 import io.astrovault.domain.ProcessedAsset;
 import io.astrovault.domain.ProcessingJob;
 import io.astrovault.domain.Target;
+import io.astrovault.domain.TargetEnrichment;
+import io.astrovault.jobs.JobQueue;
 import io.astrovault.storage.StorageService;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
@@ -29,6 +32,9 @@ public class LibraryResource {
     @Inject
     StorageService storageService;
 
+    @Inject
+    JobQueue jobQueue;
+
     public record Dashboard(
             long sessionCount,
             long frameCount,
@@ -47,6 +53,7 @@ public class LibraryResource {
             Target target,
             TargetStats stats,
             ProcessedAsset latestResult,
+            TargetEnrichment enrichment,
             List<TargetTimelineItem> timeline,
             List<ImagingSession> sessions,
             List<Frame> frames,
@@ -56,6 +63,8 @@ public class LibraryResource {
     @GET
     @Path("/dashboard")
     public Dashboard dashboard() {
+        List<ImagingSession> recentSessions = ImagingSession.<ImagingSession>find("order by id desc").page(0, 5).list();
+        attachTargetEnrichment(recentSessions);
         return new Dashboard(
                 ImagingSession.count(),
                 Frame.count(),
@@ -63,7 +72,7 @@ public class LibraryResource {
                 ProcessedAsset.count(),
                 ImagingSession.<ImagingSession>listAll().stream().mapToLong(s -> s.totalIntegrationTime == null ? 0L : s.totalIntegrationTime).sum(),
                 Frame.<Frame>find("order by id desc").page(0, 10).list(),
-                ImagingSession.<ImagingSession>find("order by id desc").page(0, 5).list(),
+                recentSessions,
                 ProcessedAsset.<ProcessedAsset>find("order by id desc").page(0, 5).list(),
                 ProcessingJob.list("status in ?1", List.of(JobStatus.PENDING, JobStatus.RUNNING))
         );
@@ -79,6 +88,7 @@ public class LibraryResource {
 
     @GET
     @Path("/targets/{id}/detail")
+    @Transactional
     public Response targetDetail(@PathParam("id") Long id) {
         Target target = Target.findById(id);
         if (target == null) {
@@ -91,6 +101,10 @@ public class LibraryResource {
         ProcessedAsset latestResult = results.stream()
                 .max(Comparator.comparing((ProcessedAsset a) -> a.createdAt == null ? Instant.EPOCH : a.createdAt).thenComparing(a -> a.id))
                 .orElse(null);
+        TargetEnrichment enrichment = TargetEnrichment.find("target.id", id).firstResult();
+        if (enrichment == null) {
+            queueTargetEnrichment(id);
+        }
         List<TargetTimelineItem> timeline = sessions.stream()
                 .map(session -> new TargetTimelineItem(
                         session.id,
@@ -106,6 +120,7 @@ public class LibraryResource {
                 target,
                 new TargetStats(sessions.size(), frames.size(), integration, results.size()),
                 latestResult,
+                enrichment,
                 timeline,
                 sessions,
                 frames,
@@ -113,7 +128,44 @@ public class LibraryResource {
         )).build();
     }
 
-    @GET @Path("/sessions") public List<ImagingSession> sessions() { return ImagingSession.listAll(); }
+    @POST
+    @Path("/targets/{id}/enrichment/refresh")
+    @Transactional
+    @RolesAllowed({"ADMIN", "USER"})
+    public Response refreshTargetEnrichment(@PathParam("id") Long id) {
+        Target target = Target.findById(id);
+        if (target == null) {
+            return Response.status(Response.Status.NOT_FOUND).build();
+        }
+        ProcessingJob job = queueTargetEnrichment(id);
+        return Response.status(Response.Status.ACCEPTED).entity(job).build();
+    }
+
+    private ProcessingJob queueTargetEnrichment(Long targetId) {
+        ProcessingJob existing = ProcessingJob.find(
+                "type = ?1 and targetId = ?2 and status in ?3",
+                JobType.TARGET_ENRICHMENT,
+                targetId,
+                List.of(JobStatus.PENDING, JobStatus.RUNNING)
+        ).firstResult();
+        if (existing != null) {
+            return existing;
+        }
+        ProcessingJob job = new ProcessingJob();
+        job.type = JobType.TARGET_ENRICHMENT;
+        job.status = JobStatus.PENDING;
+        job.createdAt = Instant.now();
+        job.targetId = targetId;
+        job.persistAndFlush();
+        jobQueue.enqueue(job);
+        return job;
+    }
+
+    @GET @Path("/sessions") public List<ImagingSession> sessions() {
+        List<ImagingSession> sessions = ImagingSession.listAll();
+        attachTargetEnrichment(sessions);
+        return sessions;
+    }
     @GET @Path("/processed-assets") public List<ProcessedAsset> processedAssets() { return ProcessedAsset.listAll(); }
 
     @GET
@@ -164,6 +216,15 @@ public class LibraryResource {
     private String fileNameFor(String key) {
         int slash = key.lastIndexOf('/');
         return (slash >= 0 ? key.substring(slash + 1) : key).replace("\"", "");
+    }
+
+    private void attachTargetEnrichment(List<ImagingSession> sessions) {
+        for (ImagingSession session : sessions) {
+            if (session.target == null || session.target.id == null) {
+                continue;
+            }
+            session.targetEnrichment = TargetEnrichment.find("target.id", session.target.id).firstResult();
+        }
     }
 
 }

@@ -30,6 +30,7 @@ public class RabbitMqJobQueue implements JobQueue {
                 payload.put("type", job.type.name());
                 payload.put("status", job.status.name());
                 payload.put("frameId", job.frameId);
+                payload.put("targetId", job.targetId);
                 ch.basicPublish("", "astrovault.jobs", MessageProperties.PERSISTENT_TEXT_PLAIN, mapper.writeValueAsBytes(payload));
                 return;
             } catch (Exception e) {

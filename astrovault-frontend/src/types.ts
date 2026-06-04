@@ -23,9 +23,27 @@ export type Session = {
   logicalGroupKey?: string;
   manualWorkflowStatus?: string;
   target?: { id?: number; name?: string };
+  targetEnrichment?: TargetEnrichment;
 };
 
-export type Target = { id: number; name: string; type?: string; notes?: string };
+export type Target = { id: number; name: string; type?: string; ra?: number; dec?: number; notes?: string };
+
+export type TargetEnrichment = {
+  id: number;
+  canonicalName?: string;
+  objectType?: string;
+  catalogIds?: string;
+  constellation?: string;
+  ra?: number;
+  dec?: number;
+  magnitude?: number;
+  apparentSize?: string;
+  distance?: string;
+  description?: string;
+  source?: string;
+  sourceReference?: string;
+  lastUpdated?: string;
+};
 
 export type Job = {
   id: number;
@@ -38,6 +56,7 @@ export type Job = {
   resultStorageKey?: string;
   frameId?: number;
   sessionId?: number;
+  targetId?: number;
 };
 
 export type ProcessedAsset = {
@@ -66,6 +85,7 @@ export type TargetDetailData = {
   target: Target;
   stats: { sessions: number; frames: number; integrationTime: number; results: number };
   latestResult?: ProcessedAsset;
+  enrichment?: TargetEnrichment;
   timeline: { sessionId: number; startTime?: string; endTime?: string; integrationTime?: number; frameCount: number; hasResult: boolean }[];
   sessions: Session[];
   frames: Frame[];

@@ -18,5 +18,6 @@ public class ProcessingJob extends PanacheEntity {
     public String errorMessage;
     public Long frameId;
     public Long sessionId;
+    public Long targetId;
     public String resultStorageKey;
 }

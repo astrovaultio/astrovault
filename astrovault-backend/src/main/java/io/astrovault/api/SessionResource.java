@@ -8,6 +8,7 @@ import io.astrovault.domain.JobType;
 import io.astrovault.domain.ProcessedAsset;
 import io.astrovault.domain.ProcessingJob;
 import io.astrovault.domain.Target;
+import io.astrovault.domain.TargetEnrichment;
 import io.astrovault.ingest.SessionAssignmentService;
 import io.astrovault.storage.StorageService;
 import jakarta.annotation.security.RolesAllowed;
@@ -54,7 +55,9 @@ public class SessionResource {
 
     @GET
     public List<ImagingSession> sessions() {
-        return ImagingSession.list("order by startTime desc nulls last, id desc");
+        List<ImagingSession> sessions = ImagingSession.list("order by startTime desc nulls last, id desc");
+        attachTargetEnrichment(sessions);
+        return sessions;
     }
 
     @GET
@@ -62,6 +65,7 @@ public class SessionResource {
     public Response sessionDetail(@PathParam("id") Long id) {
         ImagingSession session = ImagingSession.findById(id);
         if (session == null) return Response.status(Response.Status.NOT_FOUND).build();
+        attachTargetEnrichment(List.of(session));
         List<Frame> frames = Frame.list("session.id", id);
         List<ProcessedAsset> processedAssets = ProcessedAsset.list("session.id", id);
         return Response.ok(new SessionDetail(session, frames, processedAssets, workflowStatus(session, frames, processedAssets))).build();
@@ -309,6 +313,15 @@ public class SessionResource {
         }
         sessionAssignmentService.recalculateSession(targetSession);
         return Response.ok(frame).build();
+    }
+
+    private void attachTargetEnrichment(List<ImagingSession> sessions) {
+        for (ImagingSession session : sessions) {
+            if (session.target == null || session.target.id == null) {
+                continue;
+            }
+            session.targetEnrichment = TargetEnrichment.find("target.id", session.target.id).firstResult();
+        }
     }
 
     static WorkflowStatus workflowStatus(ImagingSession session, List<Frame> frames, List<ProcessedAsset> processedAssets) {

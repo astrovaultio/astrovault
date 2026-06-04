@@ -70,6 +70,7 @@ public class JobResource {
         retry.createdAt = Instant.now();
         retry.frameId = failed.frameId;
         retry.sessionId = failed.sessionId;
+        retry.targetId = failed.targetId;
         retry.persistAndFlush();
 
         if (retry.frameId != null && (retry.type == JobType.METADATA_EXTRACTION || retry.type == JobType.PREVIEW_GENERATION)) {
@@ -77,6 +78,9 @@ public class JobResource {
             if (frame != null) {
                 frame.processingStatus = FrameProcessingStatus.PENDING;
             }
+            jobQueue.enqueue(retry);
+        }
+        if (retry.targetId != null && retry.type == JobType.TARGET_ENRICHMENT) {
             jobQueue.enqueue(retry);
         }
 

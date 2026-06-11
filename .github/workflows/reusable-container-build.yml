@@ -64,7 +64,7 @@ jobs:
 
       - name: Build image for PR
         if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
@@ -78,7 +78,7 @@ jobs:
       - name: Build and push image
         if: github.event_name == 'push'
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}

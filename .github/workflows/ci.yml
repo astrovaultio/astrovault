@@ -32,7 +32,7 @@ jobs:
       ingest_worker: ${{ steps.filter.outputs.ingest_worker }}
       all: ${{ steps.filter.outputs.all }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -65,7 +65,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -83,7 +83,7 @@ jobs:
       run:
         working-directory: astrovault-backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -105,7 +105,7 @@ jobs:
       run:
         working-directory: astrovault-frontend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -129,7 +129,7 @@ jobs:
       run:
         working-directory: astrovault-worker
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -153,7 +153,7 @@ jobs:
       run:
         working-directory: astrovault-ingest-worker
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 

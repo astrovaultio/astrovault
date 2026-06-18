@@ -1,4 +1,4 @@
-astropy==7.2.0
+astropy==8.0.0
 minio==7.2.20
 numpy==2.4.6
 pika==1.4.1
